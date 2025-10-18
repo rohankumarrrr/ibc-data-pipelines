@@ -1,10 +1,17 @@
 import requests
 import json
+import argparse
 from google.cloud.sql.connector import Connector
 import pg8000
 
-WEB_APP_URL = "https://script.google.com/macros/s/AKfycbweR5LRWcpM-SB8e_P7Ofk67zt_muND7mIAxUsy3kLBPK9QUYt5ghC9k1sBX7ozwgd3FQ/exec"
-SHEET_NAME = "NCs"
+# Parse command-line arguments
+parser = argparse.ArgumentParser(description="Process Google Sheet data and insert into database.")
+parser.add_argument("--web_app_url", required=False, help="Web App URL for the Google Sheet")
+parser.add_argument("--sheet_name", required=False, help="Name of the Google Sheet to process")
+args = parser.parse_args()
+
+WEB_APP_URL = args.web_app_url or "https://script.google.com/macros/s/AKfycbweR5LRWcpM-SB8e_P7Ofk67zt_muND7mIAxUsy3kLBPK9QUYt5ghC9k1sBX7ozwgd3FQ/exec"
+SHEET_NAME = args.sheet_name or "NCs"
 
 SHEET_COLS_TO_SQL_COLS = {
     "Name": "name",
@@ -134,10 +141,7 @@ if __name__ == "__main__":
     for nc in sheet_data:
         nc.update(build_availability_sql_columns(nc))
 
-    print(sheet_data)
-
     if sheet_data:
         print("\n--- Current Sheet Data ---")
         print(json.dumps(sheet_data, indent=2))
         print("--------------------------")
-    
