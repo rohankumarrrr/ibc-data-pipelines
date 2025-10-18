@@ -1,8 +1,11 @@
 import requests
 import json
 from google.cloud.sql.connector import Connector
+import os
+from dotenv import load_dotenv
 import pg8000
 
+load_dotenv() 
 WEB_APP_URL = "https://script.google.com/macros/s/AKfycbweR5LRWcpM-SB8e_P7Ofk67zt_muND7mIAxUsy3kLBPK9QUYt5ghC9k1sBX7ozwgd3FQ/exec"
 SHEET_NAME = "NCs"
 
@@ -161,11 +164,11 @@ if __name__ == "__main__":
     # Step 3: Connect to your Cloud SQL instance
     connector = Connector()
     conn = connector.connect(
-        "avid-influence-457813-t0:us-central1:ibc-postgres-db-dev",  # Replace with your Cloud SQL instance connection name
+        os.environ["CLOUD_SQL_CONNECTION_NAME"],
         "pg8000",
-        user="postgres",
-        password="magelli923",
-        db="ibc"
+        user=os.environ["DB_USER"],
+        password=os.environ["DB_PASSWORD"],
+        db=os.environ["DB_NAME"]
     )
     cursor = conn.cursor()
 
