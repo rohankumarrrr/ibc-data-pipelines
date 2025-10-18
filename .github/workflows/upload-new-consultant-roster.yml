@@ -1,0 +1,49 @@
+name: Upload New Consultant Roster
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Environment to run the pipeline (dev or prod)"
+        required: true
+        default: "dev"
+      web_app_url:
+        description: "Web App URL for the Google Sheet"
+        required: true
+      sheet_name:
+        description: "Sheet name to process"
+        required: true
+
+jobs:
+  run-pipeline:
+    runs-on: ubuntu-latest
+
+    steps:
+    # Step 1: Checkout the repository
+    - name: Checkout repository
+      uses: actions/checkout@v3
+
+    # Step 2: Set up Python
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: "3.9"
+
+    # Step 3: Install dependencies
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+
+    # Step 4: Run the pipeline script
+    - name: Run New Consultant Pipeline
+      env:
+        WEB_APP_URL: ${{ github.event.inputs.web_app_url }}
+        SHEET_NAME: ${{ github.event.inputs.sheet_name }}
+        DB_USER: ${{ secrets.DB_USER }}
+        DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+        DB_NAME: ${{ secrets.DB_NAME }}
+        DB_HOST: ${{ secrets.DB_HOST }}
+        DB_PORT: ${{ secrets.DB_PORT }}
+      run: |
+        python pipelines/new-consultant-pipeline.py
