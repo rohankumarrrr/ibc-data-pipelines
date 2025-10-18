@@ -20,7 +20,7 @@ SHEET_COLS_TO_SQL_COLS = {
     "Major": "major",
     "Minor": "minor",
     "College": "college",
-    "Consultant Score": "consultants_score",
+    "Consultant Score": "consultant_score",
     "Semesters in IBC": "semesters_in_ibc",
     "Time Zone": "time_zone",
     "Willing to Travel": "willing_to_travel",
@@ -89,13 +89,31 @@ def build_availability_sql_columns(row_entry):
     output = {day: "".join(bits) for day, bits in availabilities.items()}
     return output
 
+def parse_boolean(value):
+    if isinstance(value, str):
+        value_lower = value.strip().lower()
+        if value_lower in ("yes", "true", "1"):
+            return True
+        elif value_lower in ("no", "false", "0"):
+            return False
+    elif isinstance(value, bool):
+        return value
+    return False  
+
+
 def insert_into_users(cursor, row):
     user_cols = []
     user_vals = []
+    
+    boolean_cols = {"us_citizen", "residency", "first_gen", "week_before_finals_availability"}
+    
     for sheet_col, sql_col in SHEET_COLS_TO_SQL_COLS.items():
         if sheet_col in row and sql_col in USERS_COLS:
+            val = row[sheet_col]
+            if sql_col in boolean_cols:
+                val = parse_boolean(val)
             user_cols.append(sql_col)
-            user_vals.append(row[sheet_col])
+            user_vals.append(val)
     
     user_cols_str = ", ".join(user_cols)
     user_vals_placeholders = ", ".join(["%s"] * len(user_vals))
@@ -104,6 +122,8 @@ def insert_into_users(cursor, row):
     cursor.execute(user_sql_query, user_vals)
     user_id = cursor.fetchone()[0]
     return user_id
+
+
 
 def insert_into_consultants(cursor, row, user_id):
     consultant_cols = []
@@ -128,16 +148,40 @@ def insert_into_consultants(cursor, row, user_id):
     cursor.execute(consultant_sql_query, consultant_vals)
 
 if __name__ == "__main__":
-    
+    # Step 1: Read the sheet
     sheet_data = read_data_from_sheet()
-    
-    for nc in sheet_data:
-        nc.update(build_availability_sql_columns(nc))
+    if not sheet_data:
+        print("No data found in the sheet. Exiting.")
+        exit(1)
 
-    print(sheet_data)
+    # Step 2: Build availability columns for each row
+    for row in sheet_data:
+        row.update(build_availability_sql_columns(row))
 
-    if sheet_data:
-        print("\n--- Current Sheet Data ---")
-        print(json.dumps(sheet_data, indent=2))
-        print("--------------------------")
+    # Step 3: Connect to your Cloud SQL instance
+    connector = Connector()
+    conn = connector.connect(
+        "avid-influence-457813-t0:us-central1:ibc-postgres-db-dev",  # Replace with your Cloud SQL instance connection name
+        "pg8000",
+        user="postgres",
+        password="magelli923",
+        db="ibc"
+    )
+    cursor = conn.cursor()
+
+    # Step 4: Insert each row into users and consultants
+    for row in sheet_data:
+        try:
+            user_id = insert_into_users(cursor, row)
+            insert_into_consultants(cursor, row, user_id)
+        except Exception as e:
+            print(f"Error inserting row {row.get('Name', '')}: {e}")
+
+    # Step 5: Commit all changes and close connection
+    conn.commit()
+    cursor.close()
+    conn.close()
+
+    print("All rows inserted successfully.")
+
     
