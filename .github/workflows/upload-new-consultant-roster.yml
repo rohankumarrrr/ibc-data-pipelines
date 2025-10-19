@@ -35,8 +35,8 @@ jobs:
     # Step 3: Install dependencies
     - name: Install dependencies
       run: |
-        python -m pip install --upgrade pip
-        pip install -r requirements.txt
+        python3 -m pip install --upgrade pip
+        pip3 install -r requirements.txt
 
     - name: Set up Google Cloud credentials
       env:
@@ -55,4 +55,4 @@ jobs:
         WEB_APP_URL: ${{ github.event.inputs.web_app_url }}
         SHEET_NAME: ${{ github.event.inputs.sheet_name }}
       run: |
-        python pipelines/new-consultant-pipeline.py
+        python3 pipelines/new-consultant-pipeline.py
