@@ -41,7 +41,20 @@ jobs:
         GCP_SERVICE_ACCOUNT_KEY: ${{ secrets.GCP_SERVICE_ACCOUNT_KEY }}
       run: |
         echo "$GCP_SERVICE_ACCOUNT_KEY" | base64 --decode > /tmp/gcp-key.json
+
+        # Debugging: Check if the file exists
+        if [ -f /tmp/gcp-key.json ]; then
+            echo "Decoded JSON file created successfully."
+        else
+            echo "Failed to create decoded JSON file."
+            exit 1
+        fi
+
+        # Debugging: Validate the JSON file
+        echo "Validating the JSON file..."
         cat /tmp/gcp-key.json
+        python -m json.tool /tmp/gcp-key.json || echo "Invalid JSON file."
+
         export GOOGLE_APPLICATION_CREDENTIALS="/tmp/gcp-key.json"
 
     # Step 4: Run the pipeline script
