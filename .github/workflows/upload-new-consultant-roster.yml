@@ -41,6 +41,7 @@ jobs:
         GCP_SERVICE_ACCOUNT_KEY: ${{ secrets.GCP_SERVICE_ACCOUNT_KEY }}
       run: |
         echo "${GCP_SERVICE_ACCOUNT_KEY}" | base64 --decode > /tmp/gcp-key.json
+        cat /tmp/gcp-key.json
         export GOOGLE_APPLICATION_CREDENTIALS="/tmp/gcp-key.json"
 
     # Step 4: Run the pipeline script
@@ -52,6 +53,6 @@ jobs:
         DB_NAME: ${{ vars.DB_NAME }}
         WEB_APP_URL: ${{ github.event.inputs.web_app_url }}
         SHEET_NAME: ${{ github.event.inputs.sheet_name }}
-        GOOGLE_APPLICATION_CREDENTIALS: "/tmp/gcp-key.json"
+        GOOGLE_APPLICATION_CREDENTIALS: /tmp/gcp-key.json
       run: |
         python pipelines/new-consultant-pipeline.py
