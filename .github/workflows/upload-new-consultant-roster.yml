@@ -29,14 +29,12 @@ jobs:
     # Step 2: Set up Python
     - name: Set up Python
       uses: actions/setup-python@v4
-      with:
-        python-version: "3.9"
 
     # Step 3: Install dependencies
     - name: Install dependencies
       run: |
-        python3 -m pip install --upgrade pip
-        pip3 install -r requirements.txt
+            python -m pip install --upgrade pip
+            pip install -r requirements.txt
 
     - name: Set up Google Cloud credentials
       env:
@@ -55,4 +53,4 @@ jobs:
         WEB_APP_URL: ${{ github.event.inputs.web_app_url }}
         SHEET_NAME: ${{ github.event.inputs.sheet_name }}
       run: |
-        python3 pipelines/new-consultant-pipeline.py
+        python pipelines/new-consultant-pipeline.py
