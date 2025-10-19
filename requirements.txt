@@ -10,7 +10,7 @@ cffi==2.0.0
 charset-normalizer==3.4.3
 cloud-sql-python-connector==1.18.4
 cryptography==46.0.2
-dnspython==2.7.0
+dnspython==2.8.0
 dotenv==0.9.9
 frozenlist==1.7.0
 google-auth==2.41.1
