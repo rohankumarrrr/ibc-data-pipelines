@@ -40,7 +40,7 @@ jobs:
       env:
         GCP_SERVICE_ACCOUNT_KEY: ${{ secrets.GCP_SERVICE_ACCOUNT_KEY }}
       run: |
-        echo "${GCP_SERVICE_ACCOUNT_KEY}" | base64 --decode > /tmp/gcp-key.json
+        echo "$GCP_SERVICE_ACCOUNT_KEY" | base64 --decode > /tmp/gcp-key.json
         cat /tmp/gcp-key.json
         export GOOGLE_APPLICATION_CREDENTIALS="/tmp/gcp-key.json"
 
