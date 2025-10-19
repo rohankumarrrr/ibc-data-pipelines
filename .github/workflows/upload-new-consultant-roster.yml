@@ -52,7 +52,7 @@ jobs:
 
         # Debugging: Validate the JSON file
         echo "Validating the JSON file..."
-        echo /tmp/gcp-key.json
+        echo "$GCP_SERVICE_ACCOUNT_KEY" | base64 --decode
         python -m json.tool /tmp/gcp-key.json || echo "Invalid JSON file."
 
         export GOOGLE_APPLICATION_CREDENTIALS="/tmp/gcp-key.json"
