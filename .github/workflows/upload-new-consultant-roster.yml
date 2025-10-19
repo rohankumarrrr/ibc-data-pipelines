@@ -38,14 +38,20 @@ jobs:
         python -m pip install --upgrade pip
         pip install -r requirements.txt
 
+    - name: Set up Google Cloud credentials
+      env:
+        GCP_SERVICE_ACCOUNT_KEY: ${{ secrets.GCP_SERVICE_ACCOUNT_KEY }}
+      run: |
+        echo "${GCP_SERVICE_ACCOUNT_KEY}" | base64 --decode > /tmp/gcp-key.json
+        export GOOGLE_APPLICATION_CREDENTIALS="/tmp/gcp-key.json"
+
     # Step 4: Run the pipeline script
     - name: Run New Consultant Pipeline
       env:
-        DB_USER: ${{ secrets.DB_USER }}
+        CLOUD_SQL_CONNECTION_NAME: ${{ secrets.CLOUD_SQL_CONNECTION_NAME }}
+        DB_USER: ${{ vars.DB_USER }}
         DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
-        DB_NAME: ${{ secrets.DB_NAME }}
-        DB_HOST: ${{ secrets.DB_HOST }}
-        DB_PORT: ${{ secrets.DB_PORT }}
+        DB_NAME: ${{ vars.DB_NAME }}
       run: |
         python pipelines/new-consultant-pipeline.py \
         --web_app_url "${{ github.event.inputs.web_app_url }}" \

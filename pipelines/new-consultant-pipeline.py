@@ -4,7 +4,6 @@ import argparse
 from google.cloud.sql.connector import Connector
 import os
 from dotenv import load_dotenv
-import pg8000
 
 # Parse command-line arguments
 parser = argparse.ArgumentParser(description="Process Google Sheet data and insert into database.")
