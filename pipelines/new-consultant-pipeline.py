@@ -4,17 +4,10 @@ import argparse
 from google.cloud.sql.connector import Connector
 import os
 from dotenv import load_dotenv
-import pg8000
-
-# Parse command-line arguments
-parser = argparse.ArgumentParser(description="Process Google Sheet data and insert into database.")
-parser.add_argument("--web_app_url", required=False, help="Web App URL for the Google Sheet")
-parser.add_argument("--sheet_name", required=False, help="Name of the Google Sheet to process")
-args = parser.parse_args()
 
 load_dotenv() 
-WEB_APP_URL = args.web_app_url or "https://script.google.com/macros/s/AKfycbweR5LRWcpM-SB8e_P7Ofk67zt_muND7mIAxUsy3kLBPK9QUYt5ghC9k1sBX7ozwgd3FQ/exec"
-SHEET_NAME = args.sheet_name or "NCs"
+WEB_APP_URL = os.environ["WEB_APP_URL"]
+SHEET_NAME = os.environ["SHEET_NAME"]
 
 SHEET_COLS_TO_SQL_COLS = {
     "Name": "name",
