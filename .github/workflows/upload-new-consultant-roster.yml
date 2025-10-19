@@ -52,7 +52,7 @@ jobs:
         DB_USER: ${{ vars.DB_USER }}
         DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
         DB_NAME: ${{ vars.DB_NAME }}
+        WEB_APP_URL: ${{ github.event.inputs.web_app_url }}
+        SHEET_NAME: ${{ github.event.inputs.sheet_name }}
       run: |
-        python pipelines/new-consultant-pipeline.py \
-        --web_app_url "${{ github.event.inputs.web_app_url }}" \
-        --sheet_name "${{ github.event.inputs.sheet_name }}"
+        python pipelines/new-consultant-pipeline.py
