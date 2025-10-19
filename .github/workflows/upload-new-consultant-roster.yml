@@ -19,6 +19,7 @@ on:
 
 jobs:
   run-pipeline:
+    environment: ${{ github.event.inputs.environment }}
     runs-on: ubuntu-latest
 
     steps:
