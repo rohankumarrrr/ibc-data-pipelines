@@ -4,9 +4,12 @@ on:
   workflow_dispatch:
     inputs:
       environment:
-        description: "Environment to run the pipeline (dev or prod)"
+        description: "Environment"
+        type: choice
+        options:
+          - dev
+          - prod
         required: true
-        default: "dev"
       web_app_url:
         description: "Web App URL for the Google Sheet"
         required: true
