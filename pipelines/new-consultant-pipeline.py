@@ -154,7 +154,63 @@ def insert_into_users(cursor, row):
         else:
             raise
 
+def get_user_id_by_email(cursor, email):
+    """Get user_id for an email address. Returns None if not found."""
+    query = "SELECT user_id FROM users WHERE email = %s;"
+    cursor.execute(query, (email,))
+    result = cursor.fetchone()
+    return result[0] if result else None
+
+def update_existing_user(cursor, row, user_id):
+    """Update an existing user's data."""
+    user_cols = []
+    user_vals = []
+    boolean_cols = {"us_citizen", "residency", "first_gen", "week_before_finals_availability"}
+    for sheet_col, sql_col in SHEET_COLS_TO_SQL_COLS.items():
+        if sheet_col in row and sql_col in USERS_COLS:
+            val = row[sheet_col]
+            if sql_col in boolean_cols:
+                val = parse_boolean(val)
+            if sql_col != "email":  # Don't update email as it's our unique key
+                user_cols.append(sql_col)
+                user_vals.append(None if val == "" else val)
+    if not user_cols:
+        return  # No fields to update
+    user_vals.append(user_id)  # For WHERE clause
+    set_clause = ", ".join(f"{col} = %s" for col in user_cols)
+    query = f"UPDATE users SET {set_clause} WHERE user_id = %s;"
+    cursor.execute(query, user_vals)
+
+def update_existing_consultant(cursor, row, user_id):
+    """Update an existing consultant's data."""
+    # First, ensure the consultant record exists
+    cursor.execute("SELECT 1 FROM consultants WHERE user_id = %s;", (user_id,))
+    exists = cursor.fetchone() is not None
+    
+    if exists:
+        # Update existing record
+        consultant_cols = []
+        consultant_vals = []
+        for sheet_col, sql_col in SHEET_COLS_TO_SQL_COLS.items():
+            if sheet_col in row and sql_col in CONSULTANTS_COLS:
+                consultant_cols.append(sql_col)
+                val = row[sheet_col]
+                consultant_vals.append(None if val == "" else val)
+        for avail_col in ["availability_mon", "availability_tue", "availability_wed", "availability_thu", "availability_fri", "availability_sat", "availability_sun"]:
+            if avail_col in row:
+                consultant_cols.append(avail_col)
+                consultant_vals.append(row[avail_col])
+        if consultant_cols:
+            consultant_vals.append(user_id)  # For WHERE clause
+            set_clause = ", ".join(f"{col} = %s" for col in consultant_cols)
+            query = f"UPDATE consultants SET {set_clause} WHERE user_id = %s;"
+            cursor.execute(query, consultant_vals)
+    else:
+        # Insert new record if it doesn't exist
+        insert_into_consultants(cursor, row, user_id)
+
 def insert_into_consultants(cursor, row, user_id):
+    """Insert a new consultant record."""
     consultant_cols = []
     consultant_vals = []
     for sheet_col, sql_col in SHEET_COLS_TO_SQL_COLS.items():
@@ -219,11 +275,23 @@ if __name__ == "__main__":
         # Only process rows that passed validation
         for row in valid_rows:
             try:
-                user_id = insert_into_users(cursor, row)
-                insert_into_consultants(cursor, row, user_id)
-                logging.info(f"Inserted user {row.get('Name', 'Unknown')} (user_id={user_id}).")
+                # Try to find existing user by email
+                email = row.get("Email")
+                existing_user_id = get_user_id_by_email(cursor, email) if email else None
+                
+                if existing_user_id:
+                    # Update existing records
+                    update_existing_user(cursor, row, existing_user_id)
+                    update_existing_consultant(cursor, row, existing_user_id)
+                    logging.info(f"Updated existing user {row.get('Name', 'Unknown')} (user_id={existing_user_id}).")
+                else:
+                    # Insert new records
+                    user_id = insert_into_users(cursor, row)
+                    insert_into_consultants(cursor, row, user_id)
+                    logging.info(f"Inserted new user {row.get('Name', 'Unknown')} (user_id={user_id}).")
             except DataConflictError as e:
-                logging.warning(f"Duplicate user detected for {row.get('Name', '')}: {e}")
+                # Should rarely happen now as we check for existing users first
+                logging.error(f"Unexpected duplicate conflict for {row.get('Name', '')}: {e}")
                 conn.rollback()
                 continue
             except PipelineError as e:
