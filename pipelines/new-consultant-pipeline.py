@@ -24,8 +24,8 @@ logging.basicConfig(
     level=logging.INFO
 )
 
-WEB_APP_URL = "https://script.google.com/macros/s/AKfycbweR5LRWcpM-SB8e_P7Ofk67zt_muND7mIAxUsy3kLBPK9QUYt5ghC9k1sBX7ozwgd3FQ/exec"
-SHEET_NAME = "NCs"
+WEB_APP_URL = os.environ["WEB_APP_URL"]
+SHEET_NAME = os.environ["SHEET_NAME"]
 
 SHEET_COLS_TO_SQL_COLS = {
     "Name": "name",
