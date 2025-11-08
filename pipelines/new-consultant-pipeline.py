@@ -1,11 +1,29 @@
-import requests
+import os
 import json
+import requests
+import pg8000
+from pg8000.dbapi import DatabaseError
+import logging
 import argparse
 from google.cloud.sql.connector import Connector
-import os
 from dotenv import load_dotenv
+from errors import (
+    PipelineError,
+    DataConflictError,
+    AuthorizationError,
+    InvalidFormatError,
+    DatabaseConnectionError,
+    SheetReadError
+)
+load_dotenv()
 
-load_dotenv() 
+logging.basicConfig(
+    filename="pipeline.log",
+    filemode="a",
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    level=logging.INFO
+)
+
 WEB_APP_URL = os.environ["WEB_APP_URL"]
 SHEET_NAME = os.environ["SHEET_NAME"]
 
@@ -37,37 +55,24 @@ USERS_COLS = {"name", "email", "gender", "race", "us_citizen", "residency", "fir
 CONSULTANTS_COLS = {"year", "major", "minor", "college", "consultants_score", "semesters_in_ibc", "time_zone", "willing_to_travel", "industry_interests", "functional_area_interests", "status", "week_before_finals_availability", "user_id"}
 
 def read_data_from_sheet():
-    """
-    Reads all data from the specified Google Sheet and returns it as a list of dicts.
-    """
-    print("\nAttempting to read all data from the sheet...")
-    
-    params = {
-        "action": "read",
-        "path": SHEET_NAME
-    }
-    
+    logging.info("Attempting to read all data from the Google Sheet...")
+    params = {"action": "read", "path": SHEET_NAME}
     try:
         response = requests.get(WEB_APP_URL, params=params, timeout=10)
         response.raise_for_status()
-        
         data = response.json()
+        logging.info(f"Successfully read {len(data)} rows from the sheet.")
         return data
     except requests.exceptions.RequestException as e:
-        print(f"An HTTP error occurred: {e}")
+        raise SheetReadError(f"HTTP request failed: {e}")
     except json.JSONDecodeError:
-        print(f"Failed to decode JSON. Raw response: {response.text}")
-    
-    return None
+        raise InvalidFormatError("Sheet returned invalid JSON format")
 
-def build_availability_sql_columns(row_entry):
-    
+def build_availability_sql_columns(row_entry, sheet_data):
     time_slots = [key for key in sheet_data[0].keys() if "GMT-0600" in key]
     time_slots.sort()
-
     availability_sql_columns = ["availability_mon", "availability_tue", "availability_wed", "availability_thu", "availability_fri", "availability_sat", "availability_sun"]
     availabilities = {day: ['0'] * 30 for day in availability_sql_columns}
-
     for idx, slot in enumerate(time_slots):
         available_days_str = row_entry.get(slot, "")
         if not available_days_str or not available_days_str.strip():
@@ -88,7 +93,6 @@ def build_availability_sql_columns(row_entry):
                 availabilities["availability_sat"][idx] = '1'
             elif day == "sunday":
                 availabilities["availability_sun"][idx] = '1'
-
     output = {day: "".join(bits) for day, bits in availabilities.items()}
     return output
 
@@ -103,30 +107,30 @@ def parse_boolean(value):
         return value
     return False  
 
-
 def insert_into_users(cursor, row):
     user_cols = []
     user_vals = []
-    
     boolean_cols = {"us_citizen", "residency", "first_gen", "week_before_finals_availability"}
-    
     for sheet_col, sql_col in SHEET_COLS_TO_SQL_COLS.items():
         if sheet_col in row and sql_col in USERS_COLS:
             val = row[sheet_col]
             if sql_col in boolean_cols:
                 val = parse_boolean(val)
             user_cols.append(sql_col)
-            user_vals.append(val)
-    
-    user_cols_str = ", ".join(user_cols)
-    user_vals_placeholders = ", ".join(["%s"] * len(user_vals))
-    user_sql_query = f"INSERT INTO users ({user_cols_str}) VALUES ({user_vals_placeholders}) RETURNING user_id;"
-    
-    cursor.execute(user_sql_query, user_vals)
-    user_id = cursor.fetchone()[0]
-    return user_id
-
-
+            user_vals.append(None if val == "" else val)
+    if not user_cols:
+        raise InvalidFormatError("No valid user columns found in row")
+    query = f"INSERT INTO users ({', '.join(user_cols)}) VALUES ({', '.join(['%s'] * len(user_vals))}) RETURNING user_id;"
+    try:
+        cursor.execute(query, user_vals)
+        user_id = cursor.fetchone()[0]
+        return user_id
+    except DatabaseError as e:
+        err = e.args[0]
+        if isinstance(err, dict) and err.get("C") == "23505":
+            raise DataConflictError(f"Duplicate key violation: {err.get('M')}")
+        else:
+            raise
 
 def insert_into_consultants(cursor, row, user_id):
     consultant_cols = []
@@ -134,55 +138,61 @@ def insert_into_consultants(cursor, row, user_id):
     for sheet_col, sql_col in SHEET_COLS_TO_SQL_COLS.items():
         if sheet_col in row and sql_col in CONSULTANTS_COLS:
             consultant_cols.append(sql_col)
-            consultant_vals.append(row[sheet_col])
-    
+            val = row[sheet_col]
+            consultant_vals.append(None if val == "" else val)
     for avail_col in ["availability_mon", "availability_tue", "availability_wed", "availability_thu", "availability_fri", "availability_sat", "availability_sun"]:
         if avail_col in row:
             consultant_cols.append(avail_col)
             consultant_vals.append(row[avail_col])
-    
     consultant_cols.append("user_id")
     consultant_vals.append(user_id)
-    
-    consultant_cols_str = ", ".join(consultant_cols)
-    consultant_vals_placeholders = ", ".join(["%s"] * len(consultant_vals))
-    consultant_sql_query = f"INSERT INTO consultants ({consultant_cols_str}) VALUES ({consultant_vals_placeholders});"
-    
-    cursor.execute(consultant_sql_query, consultant_vals)
+    query = f"INSERT INTO consultants ({', '.join(consultant_cols)}) VALUES ({', '.join(['%s'] * len(consultant_vals))});"
+    cursor.execute(query, consultant_vals)
 
 if __name__ == "__main__":
-    # Step 1: Read the sheet
-    sheet_data = read_data_from_sheet()
-    if not sheet_data:
-        print("No data found in the sheet. Exiting.")
-        exit(1)
-
-    # Step 2: Build availability columns for each row
-    for row in sheet_data:
-        row.update(build_availability_sql_columns(row))
-
-    # Step 3: Connect to your Cloud SQL instance
-    connector = Connector()
-    conn = connector.connect(
-        os.environ["CLOUD_SQL_CONNECTION_NAME"],
-        "pg8000",
-        user=os.environ["DB_USER"],
-        password=os.environ["DB_PASSWORD"],
-        db=os.environ["DB_NAME"]
-    )
-    cursor = conn.cursor()
-
-    # Step 4: Insert each row into users and consultants
-    for row in sheet_data:
+    try:
+        sheet_data = read_data_from_sheet()
+        if not sheet_data:
+            raise SheetReadError("No data found in the sheet")
+        for row in sheet_data:
+            row.update(build_availability_sql_columns(row, sheet_data))
         try:
-            user_id = insert_into_users(cursor, row)
-            insert_into_consultants(cursor, row, user_id)
+            connector = Connector()
+            conn = connector.connect(
+                os.environ["CLOUD_SQL_CONNECTION_NAME"],
+                "pg8000",
+                user=os.environ["DB_USER"],
+                password=os.environ["DB_PASSWORD"],
+                db=os.environ["DB_NAME"]
+            )
+            logging.info("Successfully connected to Cloud SQL Postgres instance.")
         except Exception as e:
-            print(f"Error inserting row {row.get('Name', '')}: {e}")
-
-    # Step 5: Commit all changes and close connection
-    conn.commit()
-    cursor.close()
-    conn.close()
-
-    print("All rows inserted successfully.")
+            raise DatabaseConnectionError(f"Database connection failed: {e}")
+        cursor = conn.cursor()
+        for row in sheet_data:
+            try:
+                user_id = insert_into_users(cursor, row)
+                insert_into_consultants(cursor, row, user_id)
+                logging.info(f"Inserted user {row.get('Name', 'Unknown')} (user_id={user_id}).")
+            except DataConflictError as e:
+                logging.warning(f"Duplicate user detected for {row.get('Name', '')}: {e}")
+                conn.rollback()
+                continue
+            except PipelineError as e:
+                logging.error(f"Row {row.get('Name', '')} failed [{e.code}]: {e.message}")
+                conn.rollback()
+                continue
+            except Exception as e:
+                logging.error(f"Unexpected insert error for row {row.get('Name', '')}: {e}")
+                conn.rollback()
+                continue
+        conn.commit()
+        cursor.close()
+        conn.close()
+        logging.info("All rows inserted successfully.")
+    except PipelineError as e:
+        logging.critical(f"Pipeline failed [{e.code}] {e.message}")
+        print(f"Pipeline failed with error {e.code}: {e.message}")
+    except Exception as e:
+        logging.critical(f"Unexpected fatal error: {e}")
+        print(f"Unexpected fatal error: {e}")

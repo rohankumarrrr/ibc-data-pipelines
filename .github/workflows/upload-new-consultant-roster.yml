@@ -56,3 +56,10 @@ jobs:
         GOOGLE_APPLICATION_CREDENTIALS: /tmp/gcp-key.json
       run: |
         python pipelines/new-consultant-pipeline.py
+    
+    - name: Upload pipeline log
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: pipeline-log-file
+        path: pipeline.log
