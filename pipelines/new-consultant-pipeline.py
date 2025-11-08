@@ -16,6 +16,7 @@ from errors import (
     SheetReadError
 )
 load_dotenv()
+import sys
 
 logging.basicConfig(
     filename="pipeline.log",
@@ -53,6 +54,27 @@ SHEET_COLS_TO_SQL_COLS = {
 
 USERS_COLS = {"name", "email", "gender", "race", "us_citizen", "residency", "first_gen", "curr_role", "netid"}
 CONSULTANTS_COLS = {"year", "major", "minor", "college", "consultants_score", "semesters_in_ibc", "time_zone", "willing_to_travel", "industry_interests", "functional_area_interests", "status", "week_before_finals_availability", "user_id"}
+
+# Required sheet columns for a row to be considered valid for processing.
+# Assumption: minimal required fields are Name, Email, Current Role, and NetID.
+REQUIRED_SHEET_COLS = ["Name", "Email", "Current Role", "NetID", "Major"]
+
+def row_is_valid_and_nc(row):
+    """Return (True, None) if row has all required fields and Current Role is 'NC' (case-insensitive).
+    Otherwise return (False, reason_string).
+    """
+    missing = []
+    for col in REQUIRED_SHEET_COLS:
+        val = row.get(col)
+        if val is None or (isinstance(val, str) and val.strip() == ""):
+            missing.append(col)
+    if missing:
+        return False, f"Missing required columns: {', '.join(missing)}"
+    # Check Current Role equals NC
+    curr_role = row.get("Current Role", "")
+    if not isinstance(curr_role, str) or curr_role.strip().lower() != "nc":
+        return False, f"Current Role is not 'NC' (value: '{curr_role}')"
+    return True, None
 
 def read_data_from_sheet():
     logging.info("Attempting to read all data from the Google Sheet...")
@@ -156,6 +178,31 @@ if __name__ == "__main__":
             raise SheetReadError("No data found in the sheet")
         for row in sheet_data:
             row.update(build_availability_sql_columns(row, sheet_data))
+
+        # Validate required fields and ensure Current Role is 'NC'.
+        valid_rows = []
+        invalid_rows_info = []
+        for row in sheet_data:
+            ok, reason = row_is_valid_and_nc(row)
+            if ok:
+                valid_rows.append(row)
+            else:
+                row_name = row.get("Name", "(no name)")
+                # Create structured PipelineError instances so the log message matches existing format
+                if reason.startswith("Missing required columns"):
+                    err = InvalidFormatError(reason)
+                    logging.warning(f"Missing data for {row_name}: {err}")
+                elif reason.startswith("Current Role is not 'NC'"):
+                    err = AuthorizationError(reason)
+                    logging.warning(f"Wrong role for {row_name}: {err}")
+                else:
+                    err = InvalidFormatError(reason)
+                    logging.warning(f"Invalid row for {row_name}: {err}")
+                invalid_rows_info.append({"row": row_name, "reason": reason})
+
+        valid_count = len(valid_rows)
+        invalid_count = len(invalid_rows_info)
+        logging.info(f"Row validation complete: {valid_count} valid, {invalid_count} invalid/missing.")
         try:
             connector = Connector()
             conn = connector.connect(
@@ -169,7 +216,8 @@ if __name__ == "__main__":
         except Exception as e:
             raise DatabaseConnectionError(f"Database connection failed: {e}")
         cursor = conn.cursor()
-        for row in sheet_data:
+        # Only process rows that passed validation
+        for row in valid_rows:
             try:
                 user_id = insert_into_users(cursor, row)
                 insert_into_consultants(cursor, row, user_id)
@@ -189,7 +237,10 @@ if __name__ == "__main__":
         conn.commit()
         cursor.close()
         conn.close()
-        logging.info("All rows inserted successfully.")
+        logging.info("All valid rows inserted successfully.")
+        # Print a concise summary for callers/CI: number of valid and invalid rows
+        summary = {"valid_rows": valid_count, "invalid_rows": invalid_count}
+        print(json.dumps(summary))
     except PipelineError as e:
         logging.critical(f"Pipeline failed [{e.code}] {e.message}")
         print(f"Pipeline failed with error {e.code}: {e.message}")
