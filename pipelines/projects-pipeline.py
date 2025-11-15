@@ -114,6 +114,25 @@ def ensure_user_for_role(cursor, netid, role_code):
     update_user_role_if_needed(cursor, user_id, role_code)
     return user_id
 
+def mark_consultant_returning(cursor, user_id):
+    """
+    Sets consultant.status = 'returning' for the given user_id.
+    Does nothing if user_id is None.
+    """
+    if user_id is None:
+        return
+
+    cursor.execute(
+        """
+        UPDATE consultants
+        SET status = 'returning'
+        WHERE user_id = %s;
+        """,
+        (user_id,)
+    )
+    logging.info(f"Consultant {user_id} marked as returning")
+
+
 
 # -------------------------------------------------------
 #  Insert Project
@@ -121,6 +140,7 @@ def ensure_user_for_role(cursor, netid, role_code):
 
 def insert_project(cursor, row):
 
+    # Handle optional net-ids for roles
     em_id  = optional_user_for_role(cursor, row.get("EM net-id"),  "EM")
     sm_id  = optional_user_for_role(cursor, row.get("SM net-id"),  "SM")
     pm_id  = optional_user_for_role(cursor, row.get("PM net-id"),  "PM")
@@ -144,8 +164,8 @@ def insert_project(cursor, row):
 
     vals = (
         row.get("Project Name"),
-        row.get("Semester"),       # can be None
-        row.get("Client Name"),    # can be None
+        row.get("Semester"),
+        row.get("Client Name"),
         em_id,
         sm_id,
         pm_id,
@@ -156,9 +176,16 @@ def insert_project(cursor, row):
     cursor.execute(query, vals)
     project_id = cursor.fetchone()[0]
     logging.info(f"Inserted project '{row['Project Name']}' (ID={project_id})")
+
+    # -------------------------------
+    # Mark SM, PM, and SCs as returning
+    # -------------------------------
+    mark_consultant_returning(cursor, sm_id)
+    mark_consultant_returning(cursor, pm_id)
+    mark_consultant_returning(cursor, sc1_id)
+    mark_consultant_returning(cursor, sc2_id)
+
     return project_id
-
-
 
 # -------------------------------------------------------
 #  Main pipeline execution
