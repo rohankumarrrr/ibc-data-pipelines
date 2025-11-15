@@ -62,4 +62,4 @@ jobs:
       uses: actions/upload-artifact@v4
       with:
         name: pipeline-log-file
-        path: pipeline.log
+        path: projects_pipeline.log
