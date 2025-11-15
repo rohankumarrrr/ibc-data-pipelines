@@ -1,4 +1,4 @@
-name: Upload New Consultant Roster
+name: Upload Projects
 
 on:
   workflow_dispatch:
@@ -45,7 +45,7 @@ jobs:
         export GOOGLE_APPLICATION_CREDENTIALS="/tmp/gcp-key.json"
 
     # Step 4: Run the pipeline script
-    - name: Run New Consultant Pipeline
+    - name: Run Projects Pipeline
       env:
         CLOUD_SQL_CONNECTION_NAME: ${{ secrets.CLOUD_SQL_CONNECTION_NAME }}
         DB_USER: ${{ vars.DB_USER }}
@@ -55,7 +55,7 @@ jobs:
         SHEET_NAME: ${{ github.event.inputs.sheet_name }}
         GOOGLE_APPLICATION_CREDENTIALS: /tmp/gcp-key.json
       run: |
-        python pipelines/new-consultant-pipeline.py
+        python pipelines/projects-pipeline.py
     
     - name: Upload pipeline log
       if: always()

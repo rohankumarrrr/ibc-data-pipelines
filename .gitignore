@@ -1,3 +1,5 @@
 venv312
 .env
 GOOGLE_APPLICATION_CREDENTIALS.json
+*pipeline.log*
+*__pycache__*

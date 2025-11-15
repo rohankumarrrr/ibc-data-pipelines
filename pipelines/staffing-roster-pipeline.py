@@ -28,6 +28,9 @@ logging.basicConfig(
 WEB_APP_URL = os.environ["WEB_APP_URL"]
 SHEET_NAME = os.environ["SHEET_NAME"]
 
+USERS_COLS = {"name", "email", "gender", "race", "us_citizen", "residency", "first_gen", "curr_role", "netid"}
+CONSULTANTS_COLS = {"year", "major", "minor", "college", "consultants_score", "semesters_in_ibc", "time_zone", "willing_to_travel", "industry_interests", "functional_area_interests", "status", "week_before_finals_availability", "user_id"}
+
 SHEET_COLS_TO_SQL_COLS = {
     "Name": "name",
     "Email": "email",
@@ -52,15 +55,12 @@ SHEET_COLS_TO_SQL_COLS = {
     "Week Before Finals Availability": "week_before_finals_availability",         
 }
 
-USERS_COLS = {"name", "email", "gender", "race", "us_citizen", "residency", "first_gen", "curr_role", "netid"}
-CONSULTANTS_COLS = {"year", "major", "minor", "college", "consultants_score", "semesters_in_ibc", "time_zone", "willing_to_travel", "industry_interests", "functional_area_interests", "status", "week_before_finals_availability", "user_id"}
-
 # Required sheet columns for a row to be considered valid for processing.
 # Assumption: minimal required fields are Name, Email, Current Role, and NetID.
 REQUIRED_SHEET_COLS = ["Name", "Email", "Current Role", "NetID", "Major"]
 
-def row_is_valid_and_nc(row):
-    """Return (True, None) if row has all required fields and Current Role is 'NC' (case-insensitive).
+def row_is_valid(row):
+    """Return (True, None) if row has all required fields (case-insensitive).
     Otherwise return (False, reason_string).
     """
     missing = []
@@ -70,10 +70,6 @@ def row_is_valid_and_nc(row):
             missing.append(col)
     if missing:
         return False, f"Missing required columns: {', '.join(missing)}"
-    # Check Current Role equals NC
-    curr_role = row.get("Current Role", "")
-    if not isinstance(curr_role, str) or curr_role.strip().lower() != "nc":
-        return False, f"Current Role is not 'NC' (value: '{curr_role}')"
     return True, None
 
 def read_data_from_sheet():
@@ -239,7 +235,7 @@ if __name__ == "__main__":
         valid_rows = []
         invalid_rows_info = []
         for row in sheet_data:
-            ok, reason = row_is_valid_and_nc(row)
+            ok, reason = row_is_valid(row)
             if ok:
                 valid_rows.append(row)
             else:
@@ -248,9 +244,6 @@ if __name__ == "__main__":
                 if reason.startswith("Missing required columns"):
                     err = InvalidFormatError(reason)
                     logging.warning(f"Missing data for {row_name}: {err}")
-                elif reason.startswith("Current Role is not 'NC'"):
-                    err = AuthorizationError(reason)
-                    logging.warning(f"Wrong role for {row_name}: {err}")
                 else:
                     err = InvalidFormatError(reason)
                     logging.warning(f"Invalid row for {row_name}: {err}")

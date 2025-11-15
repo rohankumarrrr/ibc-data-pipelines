@@ -1,0 +1,1 @@
+Consult the Standard Operating Procedures (SOPs) for each pipeline [here](https://docs.google.com/document/d/1TC6GvAMm1yaPCUtE_E0xRag7O0cf4LPwZk98tunaRu8/edit?usp=sharing).
