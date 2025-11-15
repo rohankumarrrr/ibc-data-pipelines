@@ -7,6 +7,7 @@ import logging
 import argparse
 from google.cloud.sql.connector import Connector
 from dotenv import load_dotenv
+from utils import USERS_COLS, CONSULTANTS_COLS
 from errors import (
     PipelineError,
     DataConflictError,
@@ -51,9 +52,6 @@ SHEET_COLS_TO_SQL_COLS = {
     "Status": "status",
     "Week Before Finals Availability": "week_before_finals_availability",         
 }
-
-USERS_COLS = {"name", "email", "gender", "race", "us_citizen", "residency", "first_gen", "curr_role", "netid"}
-CONSULTANTS_COLS = {"year", "major", "minor", "college", "consultants_score", "semesters_in_ibc", "time_zone", "willing_to_travel", "industry_interests", "functional_area_interests", "status", "week_before_finals_availability", "user_id"}
 
 # Required sheet columns for a row to be considered valid for processing.
 # Assumption: minimal required fields are Name, Email, Current Role, and NetID.
