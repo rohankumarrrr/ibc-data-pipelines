@@ -52,7 +52,7 @@ jobs:
         DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
         DB_NAME: ${{ vars.DB_NAME }}
         WEB_APP_URL: ${{ github.event.inputs.web_app_url }}
-        SHEET_NAME: ${{ github.event.inputs.sheet_name }}
+        PROJECT_SHEET_NAME: ${{ github.event.inputs.sheet_name }}
         GOOGLE_APPLICATION_CREDENTIALS: /tmp/gcp-key.json
       run: |
         python pipelines/staffing-roster-pipeline.py
