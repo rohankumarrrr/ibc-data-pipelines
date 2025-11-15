@@ -47,7 +47,7 @@ jobs:
         DB_NAME: ${{ vars.DB_NAME }}
         GOOGLE_APPLICATION_CREDENTIALS: /tmp/gcp-key.json
       run: |
-        python pipelines/projects-pipeline.py
+        python pipelines/end-semester-pipeline.py
     
     - name: Upload pipeline log
       if: always()
