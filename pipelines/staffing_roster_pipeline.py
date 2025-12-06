@@ -10,13 +10,14 @@ from dotenv import load_dotenv
 from errors import (
     PipelineError,
     DataConflictError,
-    AuthorizationError,
     InvalidFormatError,
     DatabaseConnectionError,
     SheetReadError
 )
 load_dotenv()
 import sys
+import random
+import string
 
 logging.basicConfig(
     filename="pipeline.log",
@@ -225,7 +226,7 @@ def insert_into_consultants(cursor, row, user_id):
 
 if __name__ == "__main__":
     try:
-        sheet_data = read_data_from_sheet()
+        sheet_data = generate_fake_sheet_data(150)
         if not sheet_data:
             raise SheetReadError("No data found in the sheet")
         for row in sheet_data:
