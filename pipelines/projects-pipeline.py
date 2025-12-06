@@ -25,11 +25,11 @@ logging.basicConfig(
     level=logging.INFO
 )
 
-WEB_APP_URL = os.environ["WEB_APP_URL"]
+PROJECT_WEB_APP_URL = os.environ["PROJECT_WEB_APP_URL"]
 PROJECTS_SHEET_NAME = os.environ["PROJECT_SHEET_NAME"]
 
 REQUIRED_PROJECT_FIELDS = [
-    "Project Name"
+    "project_name"
 ]
 
 # -------------------------------------------------------
@@ -41,7 +41,7 @@ def read_project_sheet():
     params = {"action": "read", "path": PROJECTS_SHEET_NAME}
 
     try:
-        res = requests.get(WEB_APP_URL, params=params, timeout=10)
+        res = requests.get(PROJECT_WEB_APP_URL, params=params, timeout=10)
         res.raise_for_status()
         return res.json()
     except requests.exceptions.RequestException as e:
@@ -50,11 +50,45 @@ def read_project_sheet():
         raise InvalidFormatError("Invalid JSON formatting from sheet")
 
 
+def normalize_project_row(row):
+    """Normalize incoming row keys to the underscore-style labels used by this pipeline.
+    This supports both human-readable headers (e.g. 'Project Name', 'EM net-id') and
+    already-normalized keys (e.g. 'project_name', 'em_netid')."""
+    out = {}
+    # map of target_key -> list of possible source keys (in order of preference)
+    KEY_MAP = {
+        "project_name": ["project_name", "Project Name"],
+        "project_semester": ["project_semester", "Semester"],
+        "client_name": ["client_name", "Client Name"],
+        "em_id": ["em_id", "EM id", "EM ID"],
+        "sm_id": ["sm_id", "SM id", "SM ID"],
+        "pm_id": ["pm_id", "PM id", "PM ID"],
+        "sc1_id": ["sc1_id", "SC1 id", "SC 1 id", "SC 1 ID"],
+        "sc2_id": ["sc2_id", "SC2 id", "SC 2 id", "SC 2 ID"],
+    }
+
+    for target, candidates in KEY_MAP.items():
+        for c in candidates:
+            if c in row and row.get(c) is not None and str(row.get(c)).strip() != "":
+                out[target] = row.get(c)
+                break
+        # if not found, set to None to make downstream logic simpler
+        if target not in out:
+            out[target] = None
+
+    # Preserve any other keys present in the row (so we don't lose unexpected data)
+    for k, v in row.items():
+        if k not in out:
+            out[k] = v
+
+    return out
+
+
 def project_row_valid(row):
-    # Only Project Name must be present
-    name = row.get("Project Name")
+    # Only project_name must be present
+    name = row.get("project_name")
     if name is None or (isinstance(name, str) and name.strip() == ""):
-        return False, "Project Name is required"
+        return False, "project_name is required"
 
     return True, None
 
@@ -63,26 +97,28 @@ def project_row_valid(row):
 #  Database helpers
 # -------------------------------------------------------
 
-def optional_user_for_role(cursor, netid, role_code):
+def user_id_exists(cursor, user_id):
+    cursor.execute("SELECT 1 FROM users WHERE user_id = %s;", (user_id,))
+    return cursor.fetchone() is not None
+
+def optional_user_for_role(cursor, user_id, role_code):
     """
-    Returns user_id or None if netid is missing.
-    Ensures role only if netid is not empty.
+    Returns user_id or None if user_id is missing.
+    Updates user role if user_id is provided and exists.
     """
-    if netid is None or (isinstance(netid, str) and netid.strip() == ""):
+    if user_id is None or (isinstance(user_id, str) and user_id.strip() == ""):
         return None
 
-    user_id = get_user_id_by_netid(cursor, netid)
-    if not user_id:
-        raise InvalidFormatError(f"Invalid NetID '{netid}' → user not found")
+    try:
+        user_id = int(user_id) if isinstance(user_id, str) else user_id
+    except (ValueError, TypeError):
+        raise InvalidFormatError(f"Invalid user ID '{user_id}' → must be numeric")
+
+    if not user_id_exists(cursor, user_id):
+        raise InvalidFormatError(f"User ID '{user_id}' does not exist in database")
 
     update_user_role_if_needed(cursor, user_id, role_code)
     return user_id
-
-def get_user_id_by_netid(cursor, netid):
-    cursor.execute("SELECT user_id FROM users WHERE netid = %s;", (netid,))
-    result = cursor.fetchone()
-    return result[0] if result else None
-
 
 def update_user_role_if_needed(cursor, user_id, expected_role):
     """If curr_role != expected_role, update it."""
@@ -100,19 +136,6 @@ def update_user_role_if_needed(cursor, user_id, expected_role):
         )
         logging.info(f"Updated role for user_id={user_id}: {curr} → {expected_role}")
 
-
-def ensure_user_for_role(cursor, netid, role_code):
-    """
-    role_code in {"em","sm","pm","sc"}
-    Returns the user_id.
-    Throws error if user doesn't exist.
-    """
-    user_id = get_user_id_by_netid(cursor, netid)
-    if not user_id:
-        raise InvalidFormatError(f"Invalid NetID '{netid}' → no matching user in database")
-
-    update_user_role_if_needed(cursor, user_id, role_code)
-    return user_id
 
 def mark_consultant_returning(cursor, user_id):
     """
@@ -133,6 +156,22 @@ def mark_consultant_returning(cursor, user_id):
     logging.info(f"Consultant {user_id} marked as returning")
 
 
+def link_consultant_to_project(cursor, project_id, user_id, role_code):
+    """
+    Links a consultant to a project in the consultant_projects table.
+    Does nothing if user_id is None.
+    """
+    if user_id is None:
+        return
+
+    query = """
+        INSERT INTO consultant_projects (project_id, user_id, role)
+        VALUES (%s, %s, %s);
+    """
+    cursor.execute(query, (project_id, user_id, role_code))
+    logging.info(f"Linked consultant {user_id} to project {project_id} as {role_code}")
+
+
 
 # -------------------------------------------------------
 #  Insert Project
@@ -140,12 +179,12 @@ def mark_consultant_returning(cursor, user_id):
 
 def insert_project(cursor, row):
 
-    # Handle optional net-ids for roles
-    em_id  = optional_user_for_role(cursor, row.get("EM net-id"),  "EM")
-    sm_id  = optional_user_for_role(cursor, row.get("SM net-id"),  "SM")
-    pm_id  = optional_user_for_role(cursor, row.get("PM net-id"),  "PM")
-    sc1_id = optional_user_for_role(cursor, row.get("SC 1 net-id"), "SC")
-    sc2_id = optional_user_for_role(cursor, row.get("SC 2 net-id"), "SC")
+    # Handle optional user IDs for roles (normalized labels)
+    em_id  = optional_user_for_role(cursor, row.get("em_id"),  "EM")
+    sm_id  = optional_user_for_role(cursor, row.get("sm_id"),  "SM")
+    pm_id  = optional_user_for_role(cursor, row.get("pm_id"),  "PM")
+    sc1_id = optional_user_for_role(cursor, row.get("sc1_id"), "SC")
+    sc2_id = optional_user_for_role(cursor, row.get("sc2_id"), "SC")
 
     query = """
         INSERT INTO projects (
@@ -163,9 +202,9 @@ def insert_project(cursor, row):
     """
 
     vals = (
-        row.get("Project Name"),
-        row.get("Semester"),
-        row.get("Client Name"),
+        row.get("project_name"),
+        row.get("project_semester"),
+        row.get("client_name"),
         em_id,
         sm_id,
         pm_id,
@@ -175,7 +214,7 @@ def insert_project(cursor, row):
 
     cursor.execute(query, vals)
     project_id = cursor.fetchone()[0]
-    logging.info(f"Inserted project '{row['Project Name']}' (ID={project_id})")
+    logging.info(f"Inserted project '{row.get('project_name')}' (ID={project_id})")
 
     # -------------------------------
     # Mark SM, PM, and SCs as returning
@@ -184,6 +223,15 @@ def insert_project(cursor, row):
     mark_consultant_returning(cursor, pm_id)
     mark_consultant_returning(cursor, sc1_id)
     mark_consultant_returning(cursor, sc2_id)
+
+    # -------------------------------
+    # Link consultants to project
+    # -------------------------------
+    link_consultant_to_project(cursor, project_id, em_id, "EM")
+    link_consultant_to_project(cursor, project_id, sm_id, "SM")
+    link_consultant_to_project(cursor, project_id, pm_id, "PM")
+    link_consultant_to_project(cursor, project_id, sc1_id, "SC")
+    link_consultant_to_project(cursor, project_id, sc2_id, "SC")
 
     return project_id
 
@@ -198,6 +246,9 @@ if __name__ == "__main__":
         if not sheet_data:
             raise SheetReadError("No rows found in project sheet")
 
+        # Normalize headers for each incoming row so either human or normalized headers work
+        sheet_data = [normalize_project_row(r) for r in sheet_data]
+
         valid_rows = []
         invalid = []
 
@@ -207,7 +258,7 @@ if __name__ == "__main__":
                 valid_rows.append(row)
             else:
                 logging.warning(f"Invalid project row: {reason}")
-                invalid.append({"row": row.get("Project Name", "(no name)"), "reason": reason})
+                invalid.append({"row": row.get("project_name", "(no name)"), "reason": reason})
 
         # Connect to Cloud SQL
         try:
@@ -230,10 +281,10 @@ if __name__ == "__main__":
                 insert_project(cursor, row)
 
             except PipelineError as e:
-                logging.error(f"PipelineError for '{row.get('Project Name', '?')}': {e}")
+                logging.error(f"PipelineError for '{row.get('project_name', '?')}': {e}")
                 conn.rollback()
             except Exception as e:
-                logging.error(f"Unexpected error inserting '{row.get('Project Name', '?')}': {e}")
+                logging.error(f"Unexpected error inserting '{row.get('project_name', '?')}': {e}")
                 conn.rollback()
 
         conn.commit()
