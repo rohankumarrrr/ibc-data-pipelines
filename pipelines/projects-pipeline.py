@@ -177,7 +177,58 @@ def link_consultant_to_project(cursor, project_id, user_id, role_code):
 #  Insert Project
 # -------------------------------------------------------
 
+def project_exists(cursor, project_name):
+    """Check if a project with this name already exists."""
+    cursor.execute("SELECT project_id FROM projects WHERE project_name = %s;", (project_name,))
+    result = cursor.fetchone()
+    return result[0] if result else None
+
+def get_project_data(cursor, project_id):
+    """Fetch current project data."""
+    cursor.execute(
+        """
+        SELECT project_name, project_semester, client_name, em_id, sm_id, pm_id, sc1_id, sc2_id
+        FROM projects WHERE project_id = %s;
+        """,
+        (project_id,)
+    )
+    return cursor.fetchone()
+
+def update_project(cursor, project_id, row):
+    """Update project fields that have changed."""
+    current = get_project_data(cursor, project_id)
+    
+    new_vals = (
+        row.get("project_semester"),
+        row.get("client_name"),
+        row.get("em_id"),
+        row.get("sm_id"),
+        row.get("pm_id"),
+        row.get("sc1_id"),
+        row.get("sc2_id"),
+    )
+    
+    # Check if any values changed (skip project_name as it's the key)
+    if current[1:] == new_vals:
+        logging.info(f"Project '{row.get('project_name')}' (ID={project_id}) unchanged, skipping")
+        return None
+    
+    query = """
+        UPDATE projects
+        SET project_semester = %s, client_name = %s, em_id = %s, sm_id = %s, pm_id = %s, sc1_id = %s, sc2_id = %s
+        WHERE project_id = %s;
+    """
+    cursor.execute(query, new_vals + (project_id,))
+    logging.info(f"Updated project '{row.get('project_name')}' (ID={project_id})")
+    return project_id
+
 def insert_project(cursor, row):
+
+    # Check if project already exists
+    project_id = project_exists(cursor, row.get("project_name"))
+    
+    if project_id:
+        return update_project(cursor, project_id, row)
 
     # Handle optional user IDs for roles (normalized labels)
     em_id  = optional_user_for_role(cursor, row.get("em_id"),  "EM")
