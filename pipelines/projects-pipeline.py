@@ -60,11 +60,11 @@ def normalize_project_row(row):
         "project_name": ["project_name", "Project Name"],
         "project_semester": ["project_semester", "Semester"],
         "client_name": ["client_name", "Client Name"],
-        "em_id": ["em_id", "EM id", "EM ID"],
-        "sm_id": ["sm_id", "SM id", "SM ID"],
-        "pm_id": ["pm_id", "PM id", "PM ID"],
-        "sc1_id": ["sc1_id", "SC1 id", "SC 1 id", "SC 1 ID"],
-        "sc2_id": ["sc2_id", "SC2 id", "SC 2 id", "SC 2 ID"],
+        "em_netid": ["em_netid", "EM net-id", "EM NetID"],
+        "sm_netid": ["sm_netid", "SM net-id", "SM NetID"],
+        "pm_netid": ["pm_netid", "PM net-id", "PM NetID"],
+        "sc1_netid": ["sc1_netid", "SC1 net-id", "SC 1 net-id", "SC 1 NetID"],
+        "sc2_netid": ["sc2_netid", "SC2 net-id", "SC 2 net-id", "SC 2 NetID"],
     }
 
     for target, candidates in KEY_MAP.items():
@@ -100,6 +100,33 @@ def project_row_valid(row):
 def user_id_exists(cursor, user_id):
     cursor.execute("SELECT 1 FROM users WHERE user_id = %s;", (user_id,))
     return cursor.fetchone() is not None
+
+def get_user_id_by_netid(cursor, netid):
+    """Find a user_id by their netid."""
+    if not netid or not isinstance(netid, str) or netid.strip() == "":
+        return None
+    cursor.execute("SELECT user_id FROM users WHERE netid = %s;", (netid,))
+    result = cursor.fetchone()
+    return result[0] if result else None
+
+
+def get_user_id_for_role_by_netid(cursor, netid, role_code):
+    """
+    Finds a user_id by netid and updates their role if needed.
+    Returns the user_id or None if the netid is missing.
+    Raises an error if the netid is not found in the database.
+    """
+    if not netid:
+        return None
+
+    user_id = get_user_id_by_netid(cursor, netid)
+
+    if user_id is None:
+        raise InvalidFormatError(f"NetID '{netid}' for role {role_code} not found in database")
+
+    update_user_role_if_needed(cursor, user_id, role_code)
+    return user_id
+
 
 def optional_user_for_role(cursor, user_id, role_code):
     """
@@ -196,20 +223,39 @@ def get_project_data(cursor, project_id):
 
 def update_project(cursor, project_id, row):
     """Update project fields that have changed."""
-    current = get_project_data(cursor, project_id)
+    current_data_query = """
+        SELECT p.project_semester, p.client_name, 
+               u_em.netid, u_sm.netid, u_pm.netid, u_sc1.netid, u_sc2.netid
+        FROM projects p
+        LEFT JOIN users u_em ON p.em_id = u_em.user_id
+        LEFT JOIN users u_sm ON p.sm_id = u_sm.user_id
+        LEFT JOIN users u_pm ON p.pm_id = u_pm.user_id
+        LEFT JOIN users u_sc1 ON p.sc1_id = u_sc1.user_id
+        LEFT JOIN users u_sc2 ON p.sc2_id = u_sc2.user_id
+        WHERE p.project_id = %s;
+    """
+    cursor.execute(current_data_query, (project_id,))
+    current = cursor.fetchone()
+
+    # Get user IDs for new netids
+    em_id  = get_user_id_for_role_by_netid(cursor, row.get("em_netid"),  "EM")
+    sm_id  = get_user_id_for_role_by_netid(cursor, row.get("sm_netid"),  "SM")
+    pm_id  = get_user_id_for_role_by_netid(cursor, row.get("pm_netid"),  "PM")
+    sc1_id = get_user_id_for_role_by_netid(cursor, row.get("sc1_netid"), "SC")
+    sc2_id = get_user_id_for_role_by_netid(cursor, row.get("sc2_netid"), "SC")
     
     new_vals = (
         row.get("project_semester"),
         row.get("client_name"),
-        row.get("em_id"),
-        row.get("sm_id"),
-        row.get("pm_id"),
-        row.get("sc1_id"),
-        row.get("sc2_id"),
+        row.get("em_netid"),
+        row.get("sm_netid"),
+        row.get("pm_netid"),
+        row.get("sc1_netid"),
+        row.get("sc2_netid"),
     )
     
-    # Check if any values changed (skip project_name as it's the key)
-    if current[1:] == new_vals:
+    # Check if any values changed
+    if current == new_vals:
         logging.info(f"Project '{row.get('project_name')}' (ID={project_id}) unchanged, skipping")
         return None
     
@@ -218,24 +264,26 @@ def update_project(cursor, project_id, row):
         SET project_semester = %s, client_name = %s, em_id = %s, sm_id = %s, pm_id = %s, sc1_id = %s, sc2_id = %s
         WHERE project_id = %s;
     """
-    cursor.execute(query, new_vals + (project_id,))
+    cursor.execute(query, (row.get("project_semester"), row.get("client_name"), em_id, sm_id, pm_id, sc1_id, sc2_id, project_id))
     logging.info(f"Updated project '{row.get('project_name')}' (ID={project_id})")
     return project_id
 
 def insert_project(cursor, row):
 
-    # Check if project already exists
-    project_id = project_exists(cursor, row.get("project_name"))
+    # Check if project already exists by name
+    cursor.execute("SELECT project_id FROM projects WHERE project_name = %s;", (row.get("project_name"),))
+    project_id_tuple = cursor.fetchone()
     
-    if project_id:
-        return update_project(cursor, project_id, row)
+    if project_id_tuple:
+        # Project exists, so update it
+        return update_project(cursor, project_id_tuple[0], row)
 
-    # Handle optional user IDs for roles (normalized labels)
-    em_id  = optional_user_for_role(cursor, row.get("em_id"),  "EM")
-    sm_id  = optional_user_for_role(cursor, row.get("sm_id"),  "SM")
-    pm_id  = optional_user_for_role(cursor, row.get("pm_id"),  "PM")
-    sc1_id = optional_user_for_role(cursor, row.get("sc1_id"), "SC")
-    sc2_id = optional_user_for_role(cursor, row.get("sc2_id"), "SC")
+    # Handle optional user IDs for roles by looking up netids
+    em_id  = get_user_id_for_role_by_netid(cursor, row.get("em_netid"),  "EM")
+    sm_id  = get_user_id_for_role_by_netid(cursor, row.get("sm_netid"),  "SM")
+    pm_id  = get_user_id_for_role_by_netid(cursor, row.get("pm_netid"),  "PM")
+    sc1_id = get_user_id_for_role_by_netid(cursor, row.get("sc1_netid"), "SC")
+    sc2_id = get_user_id_for_role_by_netid(cursor, row.get("sc2_netid"), "SC")
 
     query = """
         INSERT INTO projects (
